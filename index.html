@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini Town Adventure - Multi-Town Journey</title>
+    <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            color: #333;
+        }
+        canvas {
+            border: 2px solid #333;
+            background-color: #78AB51; /* Gameboy green-ish */
+            image-rendering: pixelated; /* Keep pixels sharp */
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+        }
+        #controls {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        h1 {
+            color: #5865f2; /* A nice blue */
+        }
+        #successMessageOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none; /* Initially hidden */
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        #successMessagePopup {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            text-align: center;
+            font-size: 1.5em;
+            color: #333;
+        }
+        #gameArea {
+            position: relative; /* To position the monologue box absolutely within this area */
+        }
+        #monologueBox {
+            position: absolute;
+            bottom: 10px; /* Position at the bottom of the game area */
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            max-width: 500px; /* Max width for the box */
+            background-color: rgba(0, 0, 0, 0.8); /* Semi-transparent black */
+            color: white;
+            padding: 15px;
+            border: 2px solid #fff;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 0.9em; /* Slightly smaller font for in-game feel */
+            z-index: 100; /* Ensure it's above the canvas */
+            display: none; /* Hidden by default */
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+        #monologueText {
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        /* D-Pad Styles */
+        #dPadContainer {
+            display: none; /* Hidden by default, shown via media query */
+            flex-direction: column;
+            align-items: center;
+            margin-top: 15px;
+            user-select: none; /* Prevent text selection on mobile */
+            -webkit-user-select: none; /* Safari */
+            -ms-user-select: none; /* IE 10+ */
+        }
+
+        .dpad-row {
+            display: flex;
+            justify-content: center;
+        }
+
+        .dpad-button {
+            width: 60px; /* Slightly larger for touch */
+            height: 60px;
+            background-color: #5865f2;
+            color: white;
+            border: 2px solid #333;
+            border-radius: 10px;
+            font-size: 28px; /* Larger font for visibility */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            margin: 3px; /* Small gap between buttons */
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .dpad-button:active {
+            background-color: #4752c4; /* Darker shade when pressed */
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .dpad-center {
+            width: 60px;
+            height: 60px;
+            background-color: #e0e0e0; /* A neutral color for the center */
+            border: 2px solid #bbb;
+            border-radius: 50%; /* Make it circular */
+            margin: 3px;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        /* Media Query for Mobile Devices */
+        @media (max-width: 768px) {
+            #desktopControlsText {
+                display: none; /* Hide desktop controls text */
+            }
+            #dPadContainer {
+                display: flex; /* Show D-pad */
+            }
+            /* Optional: reduce game canvas size slightly on very small screens */
+            /* canvas {
+                max-width: 95vw;
+                max-height: 60vh;
+            } */
+        }
+    </style>
+</head>
+<body>
+    <h1>Mini Town Adventure</h1>
+    <div id="gameArea">
+        <canvas id="gameCanvas"></canvas>
+        <div id="monologueBox">
+            <p id="monologueText"></p>
+        </div>
+    </div>
+    <div id="controls">
+        <p id="desktopControlsText">Use <strong>Arrow Keys</strong> to move. Current Town: <span id="currentTownName"></span></p>
+    </div>
+    <div id="dPadContainer">
+        <!-- Row 1: Up button -->
+        <div class="dpad-row">
+            <button id="dPadUp" class="dpad-button dpad-up">↑</button>
+        </div>
+        <!-- Row 2: Left, Center (optional), Right buttons -->
+        <div class="dpad-row">
+            <button id="dPadLeft" class="dpad-button dpad-left">←</button>
+            <div class="dpad-center"></div> <!-- Optional: for styling the center piece -->
+            <button id="dPadRight" class="dpad-button dpad-right">→</button>
+        </div>
+        <!-- Row 3: Down button -->
+        <div class="dpad-row">
+            <button id="dPadDown" class="dpad-button dpad-down">↓</button>
+        </div>
+    </div>
+    <div id="successMessageOverlay">
+        <div id="successMessagePopup"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const currentTownNameSpan = document.getElementById('currentTownName');
+
+        // --- Game Configuration ---
+        const TILE_SIZE = 32; // Size of each tile in pixels
+        const VIEWPORT_WIDTH_TILES = 15; // Width of the visible area in tiles
+        const VIEWPORT_HEIGHT_TILES = 10; // Height of the visible area in tiles
+
+        canvas.width = VIEWPORT_WIDTH_TILES * TILE_SIZE;
+        canvas.height = VIEWPORT_HEIGHT_TILES * TILE_SIZE;
+
+        // Tile types
+        const TILE_GRASS = 0;
+        const TILE_PATH = 1;
+        const TILE_WATER = 2;
+        const TILE_HOUSE_WALL = 3;
+        const TILE_HOUSE_ROOF = 4;
+        const TILE_TREE = 5; // Can also represent a locked gate
+        const TILE_GATE = 6; // Represents an active/traversable gate location (visually changes)
+        const TILE_KEY = 7;
+        const TILE_NPC = 8; // New tile type for NPCs
+
+
+        // --- Town Data ---
+        const townsData = [
+            {
+                id: "tucson_desert",
+                name: "Tucson Desert",
+                mapData: [
+                    [5,5,5,5,5,5,6,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5],
+                    [5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,4,4,4,4,1,1,4,4,4,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,3,3,3,3,5,5,3,3,3,1,4,4,4,4,1,1,1,1,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,3,3,3,3,5,5,3,3,3,5,3,3,3,3,1,1,1,1,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,3,3,3,3,5,5,3,3,3,5,3,3,3,3,1,1,1,1,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,1,1,1,1,1,1,1,5,5,5,5,5,5,5,5,5,5,5,1,1,1,1,1,1,1,1,1,5],
+                    [5,5,5,5,5,5,5,5,1,5,5,5,5,5,5,5,5,5,5,5,1,1,1,1,1,1,1,1,1,5],
+                    [5,5,5,5,5,5,5,5,1,5,5,5,5,5,5,5,5,5,5,5,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,1,1,1,1,1,5,1,1,1,1,1,5,5,5,5,5,5,5,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,5,5,5,5,1,5,5,5,5,5,1,5,5,5,5,5,5,5,1,1,1,1,1,1,1,1,1,5],
+                    [5,1,1,7,5,5,1,1,1,1,1,1,1,5,5,5,5,5,5,5,1,1,1,1,1,1,1,1,1,5],
+                    [5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5]
+                ],
+                key: { id: "key_to_stonebridge", name: "Old Map Scrap", location: { x: 3, y: 18 } },
+                gates: [
+                    { x: 6, y: 0, targetTownId: "stonebridge_crossing", targetPlayerStartX: 7, targetPlayerStartY: 8, requiredKeyId: "key_to_stonebridge" }
+                ]
+            },
+            {
+                id: "stonebridge_crossing",
+                name: "Stonebridge Crossing",
+                mapData: [ // 15x10
+                    [5,5,5,5,5,5,5,5,5,5,5,5,5,5,5],
+                    [5,0,0,0,0,0,0,0,0,0,0,0,0,0,5],
+                    [5,0,1,1,1,1,7,1,1,1,1,1,1,0,5], // Key for murkwater_marsh
+                    [5,0,1,0,0,0,2,2,0,0,0,1,0,0,5],
+                    [5,6,1,0,5,2,2,2,2,5,0,1,0,0,5], // Corrected: mapData[4][1] is now TILE_GATE (6)
+                    [5,0,1,0,0,0,2,2,0,0,0,1,0,0,5],
+                    [5,0,1,1,1,1,1,1,1,1,1,1,1,0,5],
+                    [5,0,0,0,0,0,0,0,0,0,0,0,0,0,5],
+                    [5,5,5,5,5,5,5,6,5,5,5,5,5,5,5], // Gate back to greenleaf [8][7], Gate to murkwater_marsh [8][7] - for demo, same tile does both
+                    [5,5,5,5,5,5,5,5,5,5,5,5,5,5,5]  // Gate to murkwater_marsh (use different one)
+                ],
+                key: { id: "key_to_murkwater", name: "Weathered Compass", location: { x: 6, y: 2 } },
+                gates: [
+                    { x: 7, y: 8, targetTownId: "tucson_desert", targetPlayerStartX: 6, targetPlayerStartY: 0, requiredKeyId: null }, // Return gate, no new key
+                    { x: 1, y: 4, targetTownId: "murkwater_marsh", targetPlayerStartX: 7, targetPlayerStartY: 8, requiredKeyId: "key_to_murkwater" } // Removed type:TILE_GATE
+                ]
+            },
+            {
+                id: "murkwater_marsh",
+                name: "Murkwater Marsh",
+                mapData: [ // 15x10
+                    [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],
+                    [2,0,0,1,1,1,7,1,1,1,0,0,2,2,2], // Key for highpeak_ascent
+                    [2,0,5,1,5,1,0,1,5,1,5,0,2,2,2],
+                    [2,0,0,1,0,0,0,0,0,1,0,0,0,0,2],
+                    [2,5,0,1,0,5,5,5,0,1,0,5,0,5,2],
+                    [2,0,0,1,0,0,0,0,0,1,0,0,0,0,2],
+                    [2,0,5,1,5,1,1,1,5,1,5,0,2,2,2],
+                    [2,0,0,0,0,0,0,0,0,0,0,0,0,6,2], // Gate to highpeak_ascent
+                    [2,2,2,2,2,2,2,6,2,2,2,2,2,2,2], // Gate back to stonebridge_crossing
+                    [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]
+                ],
+                key: { id: "key_to_highpeak", name: "Eagle Feather", location: { x: 6, y: 1 } },
+                gates: [
+                    { x: 7, y: 8, targetTownId: "stonebridge_crossing", targetPlayerStartX: 1, targetPlayerStartY: 5, requiredKeyId: null },
+                    { x: 13, y: 7, targetTownId: "highpeak_ascent", targetPlayerStartX: 1, targetPlayerStartY: 4, requiredKeyId: "key_to_highpeak" }
+                ]
+            },
+            {
+                id: "highpeak_ascent",
+                name: "Highpeak Ascent",
+                mapData: [ // 15x10
+                    [5,5,5,5,5,5,6,5,5,5,5,5,5,5,5],
+                    [5,5,5,1,1,1,1,1,1,1,5,5,5,5,5],
+                    [5,5,1,1,0,0,3,4,0,1,1,5,5,5,5],
+                    [5,1,1,0,0,3,4,4,0,0,1,1,5,5,5],
+                    [6,1,0,0,0,0,0,0,0,0,0,1,1,5,5], // Gate back on Left, placeholder for "final key/event" on Right
+                    [5,1,1,0,0,0,0,0,0,0,1,1,5,5,5],
+                    [5,5,1,1,0,0,0,0,0,1,1,5,5,5,5],
+                    [5,5,5,1,1,0,0,0,1,1,5,5,5,5,5],
+                    [5,5,5,5,1,1,7,1,1,5,5,5,5,5,5],
+                    [5,5,5,5,5,5,5,5,5,5,5,5,5,5,5]
+                ],
+                key: { id: "key_final_victory", name: "Summit Stone (Placeholder)", location: { x: 6, y: 8 } }, // Placeholder
+                gates: [
+                    { x: 0, y: 4, targetTownId: "murkwater_marsh", targetPlayerStartX: 12, targetPlayerStartY: 7, requiredKeyId: null },
+                    { x: 6, y: 0, targetTownId: "victory_screen", requiredKeyId: "key_final_victory" } // Example for future
+                ]
+            }
+        ];
+
+        // --- NPC Data ---
+        const npcData = [
+            {
+                id: "npc_old_man_greenleaf",
+                name: "Old Man Willow",
+                townId: "tucson_desert",
+                x: 10, // Example X coordinate in Greenleaf Outskirts
+                y: 5,  // Example Y coordinate in Greenleaf Outskirts
+                spriteSrc: 'assets/person_1.png', // You'll need to create this asset
+                monologue: [
+                    "Welcome, traveler, to Tucson Desert.",
+                    "Many secrets lie hidden in these lands.",
+                    "Seek the Old Map Scrap if you wish to venture further..."
+                ]
+            }
+            // Add more NPCs here
+        ];
+
+
+        // --- Image Asset Paths ---
+        const playerSpriteSources = {
+            up: 'assets/main_up.png',
+            down: 'assets/main_down.png',
+            side: 'assets/main_side.png'
+        };
+
+        const tileSpriteSources = {
+            [TILE_TREE]: 'assets/cactus.png',
+            [TILE_HOUSE_WALL]: null, // Placeholder for e.g., 'assets/house_wall.png'
+            [TILE_HOUSE_ROOF]: null, // Placeholder for e.g., 'assets/house_roof.png'
+            [TILE_GRASS]: null,      // Placeholder
+            [TILE_PATH]: null,       // Placeholder
+            [TILE_WATER]: null,       // Placeholder
+            [TILE_GATE]: null,       // Placeholder (visuals handled dynamically)
+            [TILE_KEY]: null,        // Placeholder for key sprite
+            [TILE_NPC]: null         // Placeholder for generic NPC, specific ones will be loaded
+        };
+
+        // --- Image Loading ---
+        const playerImages = {
+            up: new Image(),
+            down: new Image(),
+            side: new Image()
+        };
+
+        const loadedTileSprites = {}; // For loaded tile Image objects, e.g., { [TILE_TREE]: Image }
+        const treeSpriteRegular = new Image(); // For the standard tree sprite
+
+        let imagesToLoadCount = 0;
+        let imagesLoadedCount = 0;
+
+        const monologueBox = document.getElementById('monologueBox');
+        const monologueText = document.getElementById('monologueText');
+        let currentMonologue = null; // { npc, lineIndex, timer }
+        const MONOLOGUE_LINE_DURATION = 3000; // 3 seconds per line
+
+        function handleImageLoaded() {
+            imagesLoadedCount++;
+            if (imagesLoadedCount === imagesToLoadCount) {
+                console.log("All game images loaded successfully.");
+                // Game rendering will proceed, and sprites will be used as they become available.
+            } else if (imagesLoadedCount > imagesToLoadCount) {
+                // This case should ideally not happen if counts are managed correctly.
+                console.warn("More images loaded than expected. Check image loading logic.");
+            }
+        }
+
+        // Load player sprites
+        for (const key in playerSpriteSources) {
+            if (playerSpriteSources[key]) {
+                imagesToLoadCount++;
+                playerImages[key].onload = handleImageLoaded;
+                playerImages[key].onerror = () => {
+                    console.error("Failed to load player sprite:", playerSpriteSources[key]);
+                    handleImageLoaded(); // Still count it as "processed" to not block the counter
+                };
+                playerImages[key].src = playerSpriteSources[key];
+            }
+        }
+
+        // Load tile sprites
+        for (const tileKey in tileSpriteSources) {
+            const path = tileSpriteSources[tileKey];
+            if (path) {
+                imagesToLoadCount++;
+                const tileType = parseInt(tileKey); // Keys in tileSpriteSources are numeric constants
+                loadedTileSprites[tileType] = new Image();
+                loadedTileSprites[tileType].onload = handleImageLoaded;
+                loadedTileSprites[tileType].onerror = () => {
+                    console.error("Failed to load tile sprite:", path);
+                    handleImageLoaded(); // Still count it as "processed"
+                };
+                loadedTileSprites[tileType].src = path;
+            }
+        }
+
+        // Load the standard tree sprite separately
+        const standardTreePath = 'assets/tree.png';
+        if (standardTreePath) { // Check in case path is made null later
+            imagesToLoadCount++;
+            treeSpriteRegular.onload = handleImageLoaded;
+            treeSpriteRegular.onerror = () => {
+                console.error("Failed to load standard tree sprite:", standardTreePath);
+                handleImageLoaded();
+            };
+            treeSpriteRegular.src = standardTreePath;
+        }
+
+        // Load NPC sprites
+        npcData.forEach(npc => {
+            if (npc.spriteSrc) {
+                imagesToLoadCount++;
+                const npcSprite = new Image();
+                npcSprite.onload = handleImageLoaded;
+                npcSprite.onerror = () => {
+                    console.error("Failed to load NPC sprite:", npc.spriteSrc);
+                    handleImageLoaded();
+                };
+                npcSprite.src = npc.spriteSrc;
+                npc.sprite = npcSprite; // Store the loaded image object with the NPC data
+            }
+        });
+        // --- End Image Loading ---
+
+        // Colors for tiles (still used for fallbacks)
+        const COLORS = {
+            [TILE_GRASS]: '#78ab50',
+            [TILE_PATH]: '#d8b880',
+            [TILE_WATER]: '#6888d0',
+            [TILE_HOUSE_WALL]: '#a0a0a0',
+            [TILE_HOUSE_ROOF]: '#d06050',
+            [TILE_TREE]: '#387028',
+            PLAYER_BODY: '#f84848', // Red-ish for player
+            PLAYER_FACE: '#f8d0a0', // Skin tone for face
+            [TILE_GATE]: '#F8F9FA', // Original gate color, though it will visually mimic tree/path
+            [TILE_KEY]: '#FFD700',   // Gold color for the key
+            [TILE_NPC]: '#40E0D0'    // Turquoise for NPC fallback
+        };
+
+        // --- Player ---
+        const player = {
+            x: 27, // Initial tile X
+            y: 17, // Initial tile Y
+            size: TILE_SIZE, // Player sprite will be drawn at tile size
+            direction: 'down', // 'up', 'down', 'left', 'right'
+            currentTownId: "tucson_desert", // Starting town
+            keys: {} // e.g., { "key_to_stonebridge": true }
+        };
+
+        // --- Camera ---
+        const camera = {
+            x: 0, // Top-left tile X of the viewport, in world coordinates
+            y: 0, // Top-left tile Y of the viewport, in world coordinates
+            widthTiles: VIEWPORT_WIDTH_TILES,
+            heightTiles: VIEWPORT_HEIGHT_TILES
+        };
+
+        // --- Game Logic ---
+        function getCurrentTown() {
+            return townsData.find(town => town.id === player.currentTownId);
+        }
+
+        function getCurrentMapData() {
+            const town = getCurrentTown();
+            return town ? town.mapData : null;
+        }
+
+        function getCurrentMapWidth() {
+            const mapData = getCurrentMapData();
+            return mapData && mapData.length > 0 ? mapData[0].length : 0;
+        }
+
+        function getCurrentMapHeight() {
+            const mapData = getCurrentMapData();
+            return mapData ? mapData.length : 0;
+        }
+        
+        function updateCurrentTownName() {
+            const town = getCurrentTown();
+            if (town) {
+                currentTownNameSpan.textContent = town.name;
+            }
+        }
+
+        function saveInventoryToCookie() {
+            const inventory = {
+                currentTownId: player.currentTownId,
+                collectedKeys: player.keys,
+                x: player.x,
+                y: player.y
+            };
+            document.cookie = `miniTownAdventure=${JSON.stringify(inventory)};path=/;max-age=${60*60*24*7}`;
+            console.log("Inventory saved:", inventory);
+        }
+
+        function loadInventoryFromCookie() {
+            const cookies = document.cookie.split(';');
+            for (let cookie of cookies) {
+                const [name, value] = cookie.split('=').map(c => c.trim());
+                if (name === 'miniTownAdventure') {
+                    try {
+                        const inventory = JSON.parse(value);
+                        if (inventory) {
+                            player.currentTownId = inventory.currentTownId || townsData[0].id;
+                            player.keys = inventory.collectedKeys || {};
+                            player.x = inventory.x || townsData.find(t=>t.id === player.currentTownId)?.gates[0]?.targetPlayerStartX || 7; // Fallback
+                            player.y = inventory.y || townsData.find(t=>t.id === player.currentTownId)?.gates[0]?.targetPlayerStartY || 3; // Fallback
+                            console.log("Inventory loaded:", inventory);
+                            updateCurrentTownName();
+                        }
+                        return;
+                    } catch (e) {
+                        console.error("Error parsing inventory from cookie:", e);
+                    }
+                }
+            }
+            console.log("No inventory cookie found. Starting fresh.");
+            updateCurrentTownName(); // Set initial name
+        }
+
+        function showSuccessMessage(message, duration = 3000) {
+            const overlay = document.getElementById('successMessageOverlay');
+            const popup = document.getElementById('successMessagePopup');
+            popup.textContent = message;
+            overlay.style.display = 'flex';
+            setTimeout(() => {
+                overlay.style.display = 'none';
+            }, duration);
+        }
+
+        function isWalkable(tileX, tileY) {
+            const mapData = getCurrentMapData();
+            if (!mapData || tileX < 0 || tileX >= getCurrentMapWidth() || tileY < 0 || tileY >= getCurrentMapHeight()) {
+                return false;
+            }
+            const tileType = mapData[tileY][tileX];
+            const town = getCurrentTown();
+
+            if (tileType === TILE_GATE) {
+                const gate = town.gates.find(g => g.x === tileX && g.y === tileY);
+                return gate ? (gate.requiredKeyId ? player.keys[gate.requiredKeyId] === true : true) : false;
+            }
+            if (tileType === TILE_KEY) { // Key tile is walkable to pick up
+                 const keyDef = town.key;
+                 return keyDef && keyDef.location.x === tileX && keyDef.location.y === tileY && !player.keys[keyDef.id];
+            }
+            if (tileType === TILE_NPC) {
+                return false; // NPCs are not walkable (interaction handled in movePlayer)
+            }
+            return tileType === TILE_GRASS || tileType === TILE_PATH;
+        }
+
+        function movePlayer(dx, dy) {
+            if (currentMonologue) return; // Don't move if a monologue is active
+
+            const newX = player.x + dx;
+            const newY = player.y + dy;
+            const town = getCurrentTown();
+            const mapData = getCurrentMapData();
+
+            if (!town || !mapData) return;
+
+            if (dx > 0) player.direction = 'right';
+            if (dx < 0) player.direction = 'left';
+            if (dy > 0) player.direction = 'down';
+            if (dy < 0) player.direction = 'up';
+
+            // Check for NPC interaction before checking walkability
+            const targetTileType = mapData[newY] ? mapData[newY][newX] : undefined;
+            if (targetTileType === TILE_NPC) {
+                const npc = npcData.find(n => n.townId === player.currentTownId && n.x === newX && n.y === newY);
+                if (npc) {
+                    startMonologue(npc);
+                    return; // Stop further movement processing
+                }
+            }
+
+            if (isWalkable(newX, newY)) {
+                const originalTileType = mapData[newY][newX]; // Get tile type before player moves onto it
+
+                player.x = newX;
+                player.y = newY;
+
+                // Check for key pickup
+                if (town.key && town.key.location.x === newX && town.key.location.y === newY && !player.keys[town.key.id]) {
+                    if (originalTileType === TILE_KEY) { // Ensure it was a key tile
+                        if (town.id === "murkwater_marsh" && town.key.id === "key_to_highpeak") {
+                            console.log("[DEBUG MM Key] Attempting to pick up Eagle Feather (key_to_highpeak).");
+                            console.log("[DEBUG MM Key] player.keys BEFORE pickup:", JSON.stringify(player.keys));
+                        } else if (town.id === "stonebridge_crossing" && town.key.id === "key_to_murkwater") {
+                            console.log("[DEBUG SB Key] Attempting to pick up Weathered Compass (key_to_murkwater).");
+                            console.log("[DEBUG SB Key] player.keys BEFORE pickup:", JSON.stringify(player.keys));
+                        }
+
+                        player.keys[town.key.id] = true;
+                        
+                        if (town.id === "murkwater_marsh" && town.key.id === "key_to_highpeak") {
+                            console.log("[DEBUG MM Key] player.keys AFTER pickup:", JSON.stringify(player.keys));
+                        } else if (town.id === "stonebridge_crossing" && town.key.id === "key_to_murkwater") {
+                            console.log("[DEBUG SB Key] player.keys AFTER pickup:", JSON.stringify(player.keys));
+                        }
+
+                        mapData[newY][newX] = TILE_GRASS; // Visually remove key
+                        showSuccessMessage(`Acquired: ${town.key.name}!`);
+                        console.log(`Player picked up ${town.key.name} (${town.key.id})`);
+                        saveInventoryToCookie();
+                    }
+                }
+                // Check for gate traversal
+                else if (originalTileType === TILE_GATE) {
+                    const gate = town.gates.find(g => g.x === newX && g.y === newY);
+                    if (gate && (gate.requiredKeyId ? player.keys[gate.requiredKeyId] === true : true)) {
+                        const targetTown = townsData.find(t => t.id === gate.targetTownId);
+                        if (targetTown) {
+                            player.currentTownId = gate.targetTownId;
+                            player.x = gate.targetPlayerStartX;
+                            player.y = gate.targetPlayerStartY;
+                            showSuccessMessage(`Welcome to ${targetTown.name}!`, 2000);
+                            updateCurrentTownName();
+                            saveInventoryToCookie();
+                            // Key is NOT reset here, player keeps all collected keys
+                        }
+                    }
+                }
+                updateCamera();
+            }
+        }
+
+        function updateCamera() {
+            // Target camera position to center player, or as close as possible
+            let targetCameraX = player.x - Math.floor(VIEWPORT_WIDTH_TILES / 2);
+            let targetCameraY = player.y - Math.floor(VIEWPORT_HEIGHT_TILES / 2);
+
+            // Clamp camera to world map boundaries
+            camera.x = Math.max(0, Math.min(targetCameraX, getCurrentMapWidth() - VIEWPORT_WIDTH_TILES));
+            camera.y = Math.max(0, Math.min(targetCameraY, getCurrentMapHeight() - VIEWPORT_HEIGHT_TILES));
+        }
+
+        // --- Drawing ---
+        function drawMap() {
+            const town = getCurrentTown();
+            const mapData = getCurrentMapData();
+            if (!town || !mapData) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for (let y = 0; y < VIEWPORT_HEIGHT_TILES; y++) {
+                for (let x = 0; x < VIEWPORT_WIDTH_TILES; x++) {
+                    const mapTileX = camera.x + x;
+                    const mapTileY = camera.y + y;
+
+                    if (mapTileX >= 0 && mapTileX < getCurrentMapWidth() && mapTileY >= 0 && mapTileY < getCurrentMapHeight()) {
+                        let actualTileType = mapData[mapTileY][mapTileX]; // Start with the tile type from the map
+                        let displaySprite = null;
+                        let displayColor = null;
+                        
+                        // 1. Handle key visibility: If a key is collected, display it as grass.
+                        if (actualTileType === TILE_KEY) {
+                            if (town.key && town.key.location.x === mapTileX && town.key.location.y === mapTileY && player.keys[town.key.id]) {
+                                actualTileType = TILE_GRASS; // Key collected, effectively becomes grass for display
+                            }
+                        }
+
+                        // 2. Determine sprite and color based on actualTileType
+                        if (actualTileType === TILE_GATE) {
+                            const gateDef = town.gates.find(g => g.x === mapTileX && g.y === mapTileY);
+                            if (gateDef) {
+                                const hasRequiredKey = gateDef.requiredKeyId ? player.keys[gateDef.requiredKeyId] === true : false;
+                                
+                                if (gateDef.targetTownId === "highpeak_ascent" && town.id === "murkwater_marsh") {
+                                    console.log(`[DEBUG MM->HP Gate] Drawing Murkwater->Highpeak gate at (${mapTileX},${mapTileY}). RequiredKey: ${gateDef.requiredKeyId}. Player has key: ${player.keys[gateDef.requiredKeyId]}`);
+                                }
+                                if (gateDef.requiredKeyId === null || hasRequiredKey) { // Gate is open if no key needed OR player has key
+                                    displaySprite = loadedTileSprites[TILE_PATH] || null;
+                                    displayColor = COLORS[TILE_PATH];
+                                } else { // Gate is locked
+                                    if (town.id === "tucson_desert") {
+                                        displaySprite = loadedTileSprites[TILE_TREE]; // Cactus sprite
+                                    } else {
+                                        displaySprite = treeSpriteRegular; // Standard tree sprite
+                                    }
+                                    displayColor = COLORS[TILE_TREE];
+                                }
+                            } else { 
+                                displayColor = '#FF00FF'; // Magenta for error: Gate in mapData but not in town.gates
+                                console.error(`Gate at (${mapTileX},${mapTileY}) in town '${town.id}' is in mapData but not in town.gates array.`);
+                            }
+                        } else if (actualTileType === TILE_TREE) {
+                            if (town.id === "tucson_desert") {
+                                displaySprite = loadedTileSprites[TILE_TREE]; // Cactus sprite
+                            } else {
+                                displaySprite = treeSpriteRegular; // Standard tree sprite
+                            }
+                            displayColor = COLORS[TILE_TREE];
+                        } else { // For all non-gate tiles (including keys to be picked up, or grass where keys were)
+                            displaySprite = loadedTileSprites[actualTileType] || null;
+                            displayColor = COLORS[actualTileType] || '#000000'; // Default to black if color undefined
+
+                            if (actualTileType === TILE_NPC) {
+                                const npc = npcData.find(n => n.townId === player.currentTownId && n.x === mapTileX && n.y === mapTileY);
+                                if (npc && npc.sprite && npc.sprite.complete && npc.sprite.naturalWidth > 0) {
+                                    displaySprite = npc.sprite;
+                                } else if (npc) {
+                                    // Fallback color for this specific NPC if sprite fails or isn't defined for it
+                                    displayColor = COLORS[TILE_NPC]; // Use generic NPC color
+                                } else {
+                                    // If somehow there's an NPC tile but no NPC data, use a warning color
+                                    displayColor = '#FF00FF'; // Magenta for error: NPC tile with no data
+                                    console.warn(`NPC tile at (${mapTileX},${mapTileY}) in town '${town.id}' but no matching NPC in npcData.`);
+                                }
+                            }
+                        }
+                        
+                        // 3. Draw the tile
+                        const currentScreenX = x * TILE_SIZE;
+                        const currentScreenY = y * TILE_SIZE;
+
+                        if (displaySprite && displaySprite.complete && displaySprite.naturalWidth > 0) {
+                            ctx.drawImage(displaySprite, currentScreenX, currentScreenY, TILE_SIZE, TILE_SIZE);
+                        } else {
+                            ctx.fillStyle = displayColor;
+                            ctx.fillRect(currentScreenX, currentScreenY, TILE_SIZE, TILE_SIZE);
+
+                            // Draw details on top of fallback colored squares (if applicable and not a tree/gate that has its own look)
+                            if (actualTileType === TILE_HOUSE_WALL && !displaySprite) { 
+                                ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                                ctx.fillRect(currentScreenX, currentScreenY + TILE_SIZE * 0.7, TILE_SIZE, TILE_SIZE * 0.3);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function drawPlayer() {
+            // Only draw player if they are within the current camera view
+            if (player.x >= camera.x && player.x < camera.x + camera.widthTiles && 
+                player.y >= camera.y && player.y < camera.y + camera.heightTiles) {
+
+                const screenX = (player.x - camera.x) * TILE_SIZE;
+                const screenY = (player.y - camera.y) * TILE_SIZE;
+                const drawSize = player.size;
+
+                let spriteToDraw;
+                let flipHorizontally = false;
+
+                switch (player.direction) {
+                    case 'up':
+                        spriteToDraw = playerImages.up;
+                        break;
+                    case 'down':
+                        spriteToDraw = playerImages.down;
+                        break;
+                    case 'left':
+                        spriteToDraw = playerImages.side;
+                        flipHorizontally = true;
+                        break;
+                    case 'right':
+                        spriteToDraw = playerImages.side;
+                        break;
+                    default:
+                        spriteToDraw = playerImages.down; // Default sprite
+                }
+
+                if (spriteToDraw && spriteToDraw.complete && spriteToDraw.naturalWidth > 0) {
+                    if (flipHorizontally) {
+                        ctx.save();
+                        ctx.scale(-1, 1);
+                        ctx.drawImage(spriteToDraw, -(screenX + drawSize), screenY, drawSize, drawSize);
+                        ctx.restore();
+                    } else {
+                        ctx.drawImage(spriteToDraw, screenX, screenY, drawSize, drawSize);
+                    }
+                } else {
+                    // Fallback for player sprite
+                    ctx.fillStyle = '#FF0000'; // Default red if sprite fails
+                    ctx.fillRect(screenX, screenY, drawSize, drawSize);
+                    if (!spriteToDraw || !spriteToDraw.src) {
+                         console.warn("Player sprite source not defined for direction:", player.direction);
+                    } else if (!spriteToDraw.complete) {
+                         console.warn("Player sprite not loaded for direction:", player.direction, spriteToDraw.src);
+                    } else {
+                         console.warn("Player sprite has zero width for direction:", player.direction, spriteToDraw.src);
+                    }
+                }
+            }
+        }
+
+        function gameLoop() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Could also fill with a base color if map doesn't cover everything
+            // ctx.fillStyle = '#9bbc0f';
+            // ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            drawMap();
+            drawPlayer();
+
+            requestAnimationFrame(gameLoop); // Keep the loop going
+        }
+
+        // --- Event Listeners ---
+        window.addEventListener('keydown', (e) => {
+            let moved = false;
+            if (currentMonologue) { // If a monologue is active
+                if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                    displayNextMonologueLine(); // Advance monologue on arrow key press
+                }
+                e.preventDefault(); // Prevent player movement or other default actions
+                return;
+            }
+
+            switch (e.key) {
+                case 'ArrowUp':
+                case 'w':
+                    movePlayer(0, -1);
+                    moved = true;
+                    break;
+                case 'ArrowDown':
+                case 's':
+                    movePlayer(0, 1);
+                    moved = true;
+                    break;
+                case 'ArrowLeft':
+                case 'a':
+                    movePlayer(-1, 0);
+                    moved = true;
+                    break;
+                case 'ArrowRight':
+                case 'd':
+                    movePlayer(1, 0);
+                    moved = true;
+                    break;
+            }
+            if (moved) e.preventDefault(); // Prevent page scrolling with arrow keys
+        });
+
+        // --- Start Game ---
+        loadInventoryFromCookie(); // Load saved state or defaults
+
+        // This needs to be after loadInventoryFromCookie has potentially set player.currentTownId
+        // and before the game loop starts or camera updates that depend on currentTownNameSpan.
+        updateCurrentTownName(); 
+
+        // Initial setup if new game or data missing
+        if (!player.currentTownId || !townsData.find(t => t.id === player.currentTownId)) { // Check if currentTownId is valid
+            console.warn("Invalid or missing town ID from cookie, resetting to start.");
+            player.currentTownId = townsData[0].id; // Default to the first town
+            player.x = 27; player.y = 17; // Reset to default start for the first town
+            player.keys = {};
+            updateCurrentTownName(); // Update name if reset
+            saveInventoryToCookie(); // Save the reset state
+        }
+
+        // Ensure player starts on a walkable tile
+        if (!isWalkable(player.x, player.y)) {
+            console.warn("Player starting on non-walkable tile! Relocating...");
+            // Find first walkable tile (simple fallback)
+            let foundStart = false;
+            for (let y = 0; y < getCurrentMapHeight() && !foundStart; y++) {
+                for (let x = 0; x < getCurrentMapWidth() && !foundStart; x++) {
+                    if (isWalkable(x,y)) {
+                        player.x = x;
+                        player.y = y;
+                        foundStart = true;
+                    }
+                }
+            }
+            if (!foundStart) {
+                alert("Error: No walkable tiles found on map!"); // Should target currentMap
+            }
+        }
+        updateCamera(); // Initial camera position based on player start
+
+        gameLoop(); // Start the animation loop
+        console.log("Multi-Town Adventure loaded. Use arrow keys to move.");
+
+        // Initialize NPC positions on maps
+        townsData.forEach(town => {
+            npcData.forEach(npc => {
+                if (npc.townId === town.id) {
+                    if (town.mapData[npc.y] && town.mapData[npc.y][npc.x] !== undefined) {
+                        town.mapData[npc.y][npc.x] = TILE_NPC;
+                    } else {
+                        console.error(`NPC ${npc.id} has invalid coordinates (${npc.x},${npc.y}) for town ${town.id}.`);
+                    }
+                }
+            });
+        });
+
+        // --- D-Pad Controls ---
+        const dPadUp = document.getElementById('dPadUp');
+        const dPadDown = document.getElementById('dPadDown');
+        const dPadLeft = document.getElementById('dPadLeft');
+        const dPadRight = document.getElementById('dPadRight');
+
+        function handleDPadInput(dx, dy, event) {
+            if (event) event.preventDefault(); // Prevent default touch actions like scrolling
+            movePlayer(dx, dy);
+        }
+
+        if (dPadUp) {
+            dPadUp.addEventListener('click', (e) => handleDPadInput(0, -1, e));
+            dPadUp.addEventListener('touchstart', (e) => handleDPadInput(0, -1, e), { passive: false });
+        }
+        if (dPadDown) {
+            dPadDown.addEventListener('click', (e) => handleDPadInput(0, 1, e));
+            dPadDown.addEventListener('touchstart', (e) => handleDPadInput(0, 1, e), { passive: false });
+        }
+        if (dPadLeft) {
+            dPadLeft.addEventListener('click', (e) => handleDPadInput(-1, 0, e));
+            dPadLeft.addEventListener('touchstart', (e) => handleDPadInput(-1, 0, e), { passive: false });
+        }
+        if (dPadRight) {
+            dPadRight.addEventListener('click', (e) => handleDPadInput(1, 0, e));
+            dPadRight.addEventListener('touchstart', (e) => handleDPadInput(1, 0, e), { passive: false });
+        }
+        // --- End D-Pad Controls ---
+
+        function startMonologue(npc) {
+            if (currentMonologue || !npc || !npc.monologue || npc.monologue.length === 0) {
+                return;
+            }
+            currentMonologue = {
+                npc: npc,
+                lineIndex: 0,
+                timer: null
+            };
+            monologueBox.style.display = 'block';
+            displayNextMonologueLine();
+        }
+
+        function displayNextMonologueLine() {
+            if (!currentMonologue) return;
+
+            if (currentMonologue.timer) {
+                clearTimeout(currentMonologue.timer);
+            }
+
+            if (currentMonologue.lineIndex < currentMonologue.npc.monologue.length) {
+                monologueText.textContent = currentMonologue.npc.monologue[currentMonologue.lineIndex];
+                currentMonologue.lineIndex++;
+                currentMonologue.timer = setTimeout(displayNextMonologueLine, MONOLOGUE_LINE_DURATION);
+            } else {
+                endMonologue();
+            }
+        }
+
+        function endMonologue() {
+            if (currentMonologue && currentMonologue.timer) {
+                clearTimeout(currentMonologue.timer);
+            }
+            monologueBox.style.display = 'none';
+            monologueText.textContent = '';
+            currentMonologue = null;
+        }
+    </script>
+</body>
+</html>
